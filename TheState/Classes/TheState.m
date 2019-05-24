@@ -249,7 +249,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 
 - (void)dispatch:(TheAction *)action
 {
-    id value = action.data;
+    id value = self.value;
     NSArray *actions = [self.actions copy];
     for (NSDictionary *ta in actions) {
         SEL sel = NSSelectorFromString(ta.allKeys.firstObject);
@@ -262,7 +262,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
         if (argCount==2) {
-            value = [target performSelector:sel withObject:action withObject:self.value];
+            value = [target performSelector:sel withObject:action withObject:value];
         }else if(argCount==1){
             value = [target performSelector:sel withObject:action];
         }else{
