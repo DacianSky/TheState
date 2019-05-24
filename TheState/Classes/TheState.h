@@ -43,7 +43,7 @@ BOOL isTopic(NSString *topic,TheState *state);
 #pragma mark - state
 @interface TheState<__covariant Type> : NSObject
 {
-    @private
+@private
     Type _value;
 }
 @property (nonatomic, copy ,readonly) NSString *topic;
@@ -71,6 +71,7 @@ BOOL isTopic(NSString *topic,TheState *state);
 - (instancetype)init:(Type)data type:(NSString *)type;
 @property (nonatomic, copy) NSString *type;
 @property (nonatomic, strong) Type data;
+@property (nonatomic, assign) BOOL preventDispatch;
 @end
 @interface TheReducer : TheMonitoredState
 - (void)addTarget:(id)target action:(SEL)action;

@@ -43,6 +43,9 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 
 - (id)persistentValue:(id)defaultValue topic:(NSString *)topic
 {
+    if (self.offPersistent) {
+        return defaultValue;
+    }
     Class valClass = [defaultValue class];
     id existingValue = [[NSUserDefaults standardUserDefaults] objectForKey:topic];
     id decode = [NSKeyedUnarchiver unarchiveObjectWithData:existingValue];
@@ -58,6 +61,9 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 
 - (void)persistent:(NSString *)topic state:(id)val
 {
+    if (self.offPersistent) {
+        return;
+    }
     if (!val) {
         [[NSUserDefaults standardUserDefaults] removeObjectForKey:topic];
     }else if ([val conformsToProtocol:@protocol(NSCoding)]) {
@@ -267,6 +273,9 @@ static NSUInteger SelectorArgumentCount(SEL selector)
             value = [target performSelector:sel withObject:action];
         }else{
             value = [target performSelector:sel];
+        }
+        if (action.preventDispatch) {
+            return;// [action setPreventDispatch:NO];
         }
 #pragma clang diagnostic pop
     }
