@@ -1,0 +1,6 @@
+framework module TheState {
+  umbrella header "TheState-umbrella.h"
+
+  export *
+  module * { export * }
+}

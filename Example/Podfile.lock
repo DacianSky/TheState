@@ -1,0 +1,16 @@
+PODS:
+  - TheState (0.1.0)
+
+DEPENDENCIES:
+  - TheState (from `../`)
+
+EXTERNAL SOURCES:
+  TheState:
+    :path: "../"
+
+SPEC CHECKSUMS:
+  TheState: e10d00faed0b289cfc6ab7e4a5975a8f23051728
+
+PODFILE CHECKSUM: aafb719c180e10391d557f95a63bd7ce369a2f5a
+
+COCOAPODS: 1.5.3
