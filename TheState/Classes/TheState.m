@@ -97,7 +97,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 - (instancetype)init:(id)defaultValue :(NSString *)topic
 {
     if (self = [super init]) {
-        _lockQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.%@",topic] UTF8String],DISPATCH_QUEUE_CONCURRENT);
+        _lockQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.%@",topic] UTF8String],DISPATCH_QUEUE_SERIAL);
         _topic = topic;
         _value = defaultValue;
     }
@@ -135,16 +135,6 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 }
 
 - (id)value
-{
-    __block NSString *retVal = nil;
-    __weak typeof(self) state = self;
-    dispatch_sync(self.lockQueue, ^{
-        retVal = [state retVal];
-    });
-    return retVal;
-}
-
-- (id)retVal
 {
     return _value;
 }
@@ -190,20 +180,19 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 {
     [super didModify:value to:newValue];
     
-    NSArray<id<TheStateListener>> *allListeners = [self allListeners];
     __weak typeof(self) state = self;
-    for (id<TheStateListener> l in allListeners) {
-        dispatch_queue_t queue = dispatch_get_main_queue();
-        if ([l respondsToSelector:@selector(stateListenerQueue)]) {
-            queue = l.stateListenerQueue;
-        }
-        dispatch_async(queue, ^{
-            id value = state.value;
-            if (![self needFilter:state.lastValue value:value]) {
-                [l stateModified:state];
+    state.lastValue = value;
+    if (![self needFilter:state.lastValue value:newValue]) {
+        NSArray<id<TheStateListener>> *allListeners = [self allListeners];
+        for (id<TheStateListener> l in allListeners) {
+            dispatch_queue_t queue = dispatch_get_main_queue();
+            if ([l respondsToSelector:@selector(stateListenerQueue)]) {
+                queue = l.stateListenerQueue;
             }
-            state.lastValue = value;
-        });
+            dispatch_barrier_sync(queue, ^{
+                [l stateModified:state value:newValue];
+            });
+        }
     }
 }
 
@@ -250,7 +239,8 @@ static NSUInteger SelectorArgumentCount(SEL selector)
     if (!target || !action) {
         return;
     }
-    [self.actions addObject:@{NSStringFromSelector(action):target}];
+    __weak typeof(target) weak_target = target;
+    [self.actions addObject:@{NSStringFromSelector(action):weak_target}];
 }
 
 - (void)dispatch:(TheAction *)action
@@ -275,7 +265,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
             value = [target performSelector:sel];
         }
         if (action.preventDispatch) {
-            return;// [action setPreventDispatch:NO];
+            return [action setPreventDispatch:NO];
         }
 #pragma clang diagnostic pop
     }

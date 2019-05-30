@@ -26,7 +26,7 @@ BOOL isTopic(NSString *topic,TheState *state);
 
 @protocol TheStateListener <NSObject>
 @required
-- (void)stateModified:(TheState *)state;
+- (void)stateModified:(TheState *)state value:(id)value;
 @optional
 - (dispatch_queue_t)stateListenerQueue;
 @end
