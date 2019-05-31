@@ -34,9 +34,8 @@
 //    return dispatch_get_main_queue();
 //}
 
-- (void)stateModified:(TheState *)state
+- (void)stateModified:(TheState *)state value:(NSDictionary *)collectList
 {
-    NSDictionary *collectList = state.value;
     if(isTopic(kTopicTypeReservation,state)){
         if (![@"" isEqualToString: @"prevue_id_1"]) {
             NSString *lastState = collectList[@"prevue_id_1"];

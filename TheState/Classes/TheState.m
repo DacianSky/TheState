@@ -107,7 +107,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 - (void)willModify:(id)value to:(id)newValue
 {
     if (![self needFilter:newValue value:value]) {
-        NSLog(@"willModify topic %@ with %@.",self.topic,value);
+//        NSLog(@"willModify topic %@ with %@.",self.topic,value);
     }
 }
 
@@ -123,15 +123,16 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 {
     [self.persistentObject persistent:self.topic state:newValue];
     if (![self needFilter:newValue value:value]) {
-        NSLog(@"didModify topic %@ with %@.",self.topic,newValue);
+//        NSLog(@"didModify topic %@ with %@.",self.topic,newValue);
     }
 }
 
 - (void)setValue:(id)newValue
 {
-    [self willModify:_value to:newValue];
+    id oldValue = _value;
+    [self willModify:oldValue to:newValue];
     _value = newValue;
-    [self didModify:_value to:newValue];
+    [self didModify:oldValue to:newValue];
 }
 
 - (id)value
