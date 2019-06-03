@@ -82,6 +82,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 #pragma mark - state
 @interface TheState<__covariant Type>()
 @property (nonatomic) dispatch_queue_t lockQueue;
+@property (nonatomic, strong ,readwrite) Type value;
 //@property (nonatomic, strong,readonly) Class valClass = [self.value class];
 @end
 @implementation TheState
@@ -104,51 +105,23 @@ static NSUInteger SelectorArgumentCount(SEL selector)
     return self;
 }
 
-- (void)willModify:(id)value to:(id)newValue
-{
-    if (![self needFilter:newValue value:value]) {
-//        NSLog(@"willModify topic %@ with %@.",self.topic,value);
-    }
-}
+- (void)willModify:(id)value to:(id)newValue{}
 
-- (void)modify:(id)newValue
+- (void)modify:(id<NSCopying>)newValue
 {
     __weak typeof(self) state = self;
     dispatch_barrier_async(self.lockQueue, ^{
-        state.value = newValue;
+        __strong typeof(state) self = state;
+        id oldValue = self.value;
+        [self willModify:oldValue to:newValue];
+        self.value = newValue;
+        [self didModify:oldValue to:newValue];
     });
 }
 
 - (void)didModify:(id)value to:(id)newValue
 {
     [self.persistentObject persistent:self.topic state:newValue];
-    if (![self needFilter:newValue value:value]) {
-//        NSLog(@"didModify topic %@ with %@.",self.topic,newValue);
-    }
-}
-
-- (void)setValue:(id)newValue
-{
-    id oldValue = _value;
-    [self willModify:oldValue to:newValue];
-    _value = newValue;
-    [self didModify:oldValue to:newValue];
-}
-
-- (id)value
-{
-    return _value;
-}
-
-- (BOOL)needFilter:(id)newValue value:(id)value
-{
-    BOOL flag = NO;
-    if (self.filterSameValue) {
-        if (newValue == _value || [newValue isEqual:_value]) {
-            flag = YES;
-        }
-    }
-    return flag;
 }
 
 @end
@@ -157,7 +130,6 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 @interface TheMonitoredState()
 @property (nonatomic, strong) NSHashTable<id> *listeners;
 @property (nonatomic) dispatch_queue_t listenerLockQueue;
-@property (nonatomic, strong) id lastValue;
 @end
 @implementation TheMonitoredState
 
@@ -176,24 +148,31 @@ static NSUInteger SelectorArgumentCount(SEL selector)
     });
 }
 
-- (void)willModify:(id)value to:(id)newValue{}
-- (void)didModify:(id)value to:(id)newValue
+- (void)modify:(id<NSCopying>)newValue
 {
-    [super didModify:value to:newValue];
-    
     __weak typeof(self) state = self;
-    state.lastValue = value;
-    if (![self needFilter:state.lastValue value:newValue]) {
-        NSArray<id<TheStateListener>> *allListeners = [self allListeners];
-        for (id<TheStateListener> l in allListeners) {
-            dispatch_queue_t queue = dispatch_get_main_queue();
-            if ([l respondsToSelector:@selector(stateListenerQueue)]) {
-                queue = l.stateListenerQueue;
-            }
-            dispatch_barrier_sync(queue, ^{
-                [l stateModified:state value:newValue];
-            });
+    dispatch_barrier_async(self.lockQueue, ^{
+        __strong typeof(state) self = state;
+        id oldValue = self.value;
+        [self willModify:oldValue to:newValue];
+        self.value = newValue;
+        [self assignListener:oldValue to:newValue];
+        [self didModify:newValue to:newValue];
+    });
+}
+
+- (void)assignListener:(id)value to:(id)newValue
+{
+    __weak typeof(self) state = self;
+    NSArray<id<TheStateListener>> *allListeners = [self allListeners];
+    for (id<TheStateListener> l in allListeners) {
+        dispatch_queue_t queue = dispatch_get_main_queue();
+        if ([l respondsToSelector:@selector(stateListenerQueue)]) {
+            queue = l.stateListenerQueue;
         }
+        dispatch_sync(queue, ^{
+            [l stateModified:state value:newValue];
+        });
     }
 }
 
@@ -224,8 +203,28 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 
 @interface TheReducer()
 @property (nonatomic, strong) NSMutableArray *actions;
+@property (nonatomic) dispatch_queue_t reducerQueue;
+@property (nonatomic, strong) NSRecursiveLock *coreLock;
+
+@property (nonatomic, assign) BOOL uncompleteDispatch;
+@property (nonatomic, strong) NSMutableArray *aggregate;
 @end
 @implementation TheReducer
+
+- (instancetype)init:(id)defaultValue :(NSString *)topic
+{
+    _tpi = 20;
+    _reducerQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.reducer.%@",topic] UTF8String],DISPATCH_QUEUE_SERIAL);
+    return [super init:defaultValue :topic];
+}
+
+- (NSMutableArray *)aggregate
+{
+    if (!_aggregate) {
+        _aggregate = [[NSMutableArray alloc] init];
+    }
+    return _aggregate;
+}
 
 - (NSMutableArray *)actions
 {
@@ -246,7 +245,53 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 
 - (void)dispatch:(TheAction *)action
 {
+    if (![action isKindOfClass:[TheAction class]]) {
+        return;
+    }
+    __weak typeof(self) state = self;
+    dispatch_barrier_sync(self.reducerQueue, ^{
+        __strong typeof(state) self = state;
+        [self lock];
+        [self.aggregate addObject:action];
+        [self unlock];
+    });
+    dispatch_barrier_async(self.reducerQueue, ^{
+        __strong typeof(state) self = state;
+        [self executeNext];
+    });
+}
+
+- (void)executeNext
+{
+    if (self.uncompleteDispatch || self.aggregate.count<=0) {
+        return;
+    }
+    [self lock];
+    self.uncompleteDispatch = YES;
     id value = self.value;
+    int t = 0;
+    while (self.aggregate.count>0) {
+        TheAction *action = [self.aggregate firstObject];
+        if (!action || action.executeLast) {
+            break;
+        }
+        value = [self executeAction:action withValue:value];
+        [self.aggregate removeObject:action];
+        if (action.executeImmediately) {
+            break;
+        }
+        t++;
+        if (t>=self.tpi) {
+            break;
+        }
+    }
+    [self unlock];
+    [self modify:value];
+}
+
+- (id)executeAction:(TheAction *)action withValue:(id)nValue
+{
+    id value = [nValue mutableCopy];
     NSArray *actions = [self.actions copy];
     for (NSDictionary *ta in actions) {
         SEL sel = NSSelectorFromString(ta.allKeys.firstObject);
@@ -266,11 +311,37 @@ static NSUInteger SelectorArgumentCount(SEL selector)
             value = [target performSelector:sel];
         }
         if (action.preventDispatch) {
-            return [action setPreventDispatch:NO];
+            action.preventDispatch = NO;
+            return nValue;
         }
 #pragma clang diagnostic pop
     }
-    [self modify:value];
+    return value;
+}
+
+
+- (void)didModify:(id)value to:(id)newValue
+{
+    [super didModify:value to:newValue];
+    [self lock];
+    self.uncompleteDispatch = NO;
+    [self unlock];
+    [self executeNext];
+}
+
+#pragma mark - NSLocking
+
+- (void)lock
+{
+    if (!self.coreLock) {
+        self.coreLock = [[NSRecursiveLock alloc] init];
+    }
+    [self.coreLock lock];
+}
+
+- (void)unlock
+{
+    [self.coreLock unlock];
 }
 
 @end

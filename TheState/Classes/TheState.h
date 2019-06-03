@@ -47,7 +47,7 @@ BOOL isTopic(NSString *topic,TheState *state);
     Type _value;
 }
 @property (nonatomic, copy ,readonly) NSString *topic;
-@property (nonatomic, copy ,readonly) Type value;
+@property (nonatomic, strong ,readonly) Type value;
 
 @property (nonatomic, assign) BOOL filterSameValue;
 @property (nonatomic, strong) id<ThePersistentProtocol> persistentObject;
@@ -72,8 +72,11 @@ BOOL isTopic(NSString *topic,TheState *state);
 @property (nonatomic, copy) NSString *type;
 @property (nonatomic, strong) Type data;
 @property (nonatomic, assign) BOOL preventDispatch;
+@property (nonatomic, assign) BOOL executeLast;
+@property (nonatomic, assign) BOOL executeImmediately;
 @end
 @interface TheReducer : TheMonitoredState
+@property (nonatomic, assign) NSInteger tpi;
 - (void)addTarget:(id)target action:(SEL)action;
 - (void)dispatch:(TheAction *)action;
 @end
