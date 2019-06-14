@@ -10,6 +10,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 @class TheState;
+@class TheAction;
 
 #pragma mark - tool
 BOOL isTopic(NSString *topic,TheState *state);
@@ -25,10 +26,15 @@ BOOL isTopic(NSString *topic,TheState *state);
 @end
 
 @protocol TheStateListener <NSObject>
-@required
-- (void)stateModified:(TheState *)state value:(id)value;
 @optional
+- (void)stateModified:(TheState *)state value:(id)value;
 - (dispatch_queue_t)stateListenerQueue;
+@end
+
+@protocol TheReducerStateListener <TheStateListener>
+@optional
+- (void)willReduceAction:(TheAction *)action value:(id)value;
+- (void)didReduceAction:(TheAction *)action value:(id)value;
 @end
 
 

@@ -83,7 +83,6 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 @interface TheState<__covariant Type>()
 @property (nonatomic) dispatch_queue_t lockQueue;
 @property (nonatomic, strong ,readwrite) Type value;
-//@property (nonatomic, strong,readonly) Class valClass = [self.value class];
 @end
 @implementation TheState
 
@@ -129,23 +128,19 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 
 @interface TheMonitoredState()
 @property (nonatomic, strong) NSHashTable<id> *listeners;
-@property (nonatomic) dispatch_queue_t listenerLockQueue;
 @end
 @implementation TheMonitoredState
 
 - (instancetype)init:(id)defaultValue :(NSString *)topic
 {
     _listeners = [NSHashTable weakObjectsHashTable];
-    _listenerLockQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.listeners.%@",topic] UTF8String],DISPATCH_QUEUE_CONCURRENT);
     return [super init:defaultValue :topic];
 }
 
 - (void)attach:(id<TheStateListener>)listener
 {
     __weak typeof(self) state = self;
-    dispatch_barrier_sync(self.listenerLockQueue, ^{
-        [state.listeners addObject:listener];
-    });
+    [state.listeners addObject:listener];
 }
 
 - (void)modify:(id<NSCopying>)newValue
@@ -171,12 +166,14 @@ static NSUInteger SelectorArgumentCount(SEL selector)
             queue = l.stateListenerQueue;
         }
         dispatch_sync(queue, ^{
-            [l stateModified:state value:newValue];
+            if ([l respondsToSelector:@selector(stateModified:value:)]) {
+                [l stateModified:state value:newValue];
+            }
         });
     }
 }
 
-- (NSArray<id<TheStateListener>> *)allListeners
+- (NSArray<__kindof id<TheStateListener>> *)allListeners
 {
     return [self.listeners allObjects];
 }
@@ -214,7 +211,8 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 - (instancetype)init:(id)defaultValue :(NSString *)topic
 {
     _tpi = 20;
-    _reducerQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.reducer.%@",topic] UTF8String],DISPATCH_QUEUE_SERIAL);
+//    _reducerQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.reducer.%@",topic] UTF8String],DISPATCH_QUEUE_SERIAL);
+    _reducerQueue = dispatch_queue_create([[NSString stringWithFormat:@"TheState.reducer.%@",topic] UTF8String],DISPATCH_QUEUE_CONCURRENT);
     return [super init:defaultValue :topic];
 }
 
@@ -249,13 +247,13 @@ static NSUInteger SelectorArgumentCount(SEL selector)
         return;
     }
     __weak typeof(self) state = self;
-    dispatch_barrier_sync(self.reducerQueue, ^{
+    dispatch_async(self.reducerQueue, ^{
         __strong typeof(state) self = state;
         [self lock];
         [self.aggregate addObject:action];
         [self unlock];
     });
-    dispatch_barrier_async(self.reducerQueue, ^{
+    dispatch_async(self.reducerQueue, ^{
         __strong typeof(state) self = state;
         [self executeNext];
     });
@@ -276,7 +274,9 @@ static NSUInteger SelectorArgumentCount(SEL selector)
             break;
         }
         value = [self executeAction:action withValue:value];
+        [self lock];
         [self.aggregate removeObject:action];
+        [self unlock];
         if (action.executeImmediately) {
             break;
         }
@@ -292,6 +292,7 @@ static NSUInteger SelectorArgumentCount(SEL selector)
 - (id)executeAction:(TheAction *)action withValue:(id)nValue
 {
     id value = [nValue mutableCopy];
+    [self willExecuteAction:action withValue:value];
     NSArray *actions = [self.actions copy];
     for (NSDictionary *ta in actions) {
         SEL sel = NSSelectorFromString(ta.allKeys.firstObject);
@@ -312,13 +313,14 @@ static NSUInteger SelectorArgumentCount(SEL selector)
         }
         if (action.preventDispatch) {
             action.preventDispatch = NO;
-            return nValue;
+            value = nValue;
+            break;
         }
 #pragma clang diagnostic pop
     }
+    [self didExecuteAction:action withValue:value];
     return value;
 }
-
 
 - (void)didModify:(id)value to:(id)newValue
 {
@@ -327,6 +329,38 @@ static NSUInteger SelectorArgumentCount(SEL selector)
     self.uncompleteDispatch = NO;
     [self unlock];
     [self executeNext];
+}
+
+- (void)willExecuteAction:(TheAction *)action withValue:(id)nValue
+{
+    NSArray<id<TheReducerStateListener>> *allListeners = [self allListeners];
+    for (id<TheReducerStateListener> l in allListeners) {
+        dispatch_queue_t queue = dispatch_get_main_queue();
+        if ([l respondsToSelector:@selector(stateListenerQueue)]) {
+            queue = l.stateListenerQueue;
+        }
+        dispatch_sync(queue, ^{
+            if ([l respondsToSelector:@selector(willReduceAction:value:)]) {
+                [l willReduceAction:action value:nValue];
+            }
+        });
+    }
+}
+
+- (void)didExecuteAction:(TheAction *)action withValue:(id)value
+{
+    NSArray<id<TheReducerStateListener>> *allListeners = [self allListeners];
+    for (id<TheReducerStateListener> l in allListeners) {
+        dispatch_queue_t queue = dispatch_get_main_queue();
+        if ([l respondsToSelector:@selector(stateListenerQueue)]) {
+            queue = l.stateListenerQueue;
+        }
+        dispatch_sync(queue, ^{
+            if ([l respondsToSelector:@selector(didReduceAction:value:)]) {
+                [l didReduceAction:action value:value];
+            }
+        });
+    }
 }
 
 #pragma mark - NSLocking
