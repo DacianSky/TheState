@@ -312,13 +312,13 @@ static NSUInteger SelectorArgumentCount(SEL selector)
             value = [target performSelector:sel];
         }
         if (action.preventDispatch) {
-            action.preventDispatch = NO;
             value = nValue;
             break;
         }
 #pragma clang diagnostic pop
     }
     [self didExecuteAction:action withValue:value];
+    action.preventDispatch = NO;
     return value;
 }
 
