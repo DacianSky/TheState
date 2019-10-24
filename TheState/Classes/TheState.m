@@ -317,7 +317,9 @@ static NSUInteger SelectorArgumentCount(SEL selector)
         }
 #pragma clang diagnostic pop
     }
-    [self didExecuteAction:action withValue:value];
+    if (!action.preventDispatch) {
+        [self didExecuteAction:action withValue:value];
+    }
     action.preventDispatch = NO;
     return value;
 }
